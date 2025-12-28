@@ -1,0 +1,7 @@
+{
+  "name": "VoxNova - Advanced AI Text-to-Speech",
+  "description": "A world-class AI-powered text-to-speech platform utilizing Gemini 2.5 for high-fidelity voice generation across multiple languages with granular controls.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
