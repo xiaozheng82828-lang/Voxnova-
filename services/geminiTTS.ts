@@ -1,23 +1,20 @@
 import { decodeAudioData } from '../utils/audioUtils';
-import { VOICE_OPTIONS } from '../constants';
 
-// NOTE: Vite me 'process.env' nahi chalta, 'import.meta.env' chalta hai
+// Note: Ensure Vercel variable name is VITE_GEMINI_API_KEY
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 export class TTSService {
   
   async generateSpeech(params: any): Promise<AudioBuffer> {
-    // Debugging ke liye: Check karein key aayi ya nahi
     if (!API_KEY) {
-      console.error("Vercel Env Var check failed. Name should be VITE_GEMINI_API_KEY");
-      throw new Error("API Key missing! Vercel Settings me variable ka naam 'VITE_GEMINI_API_KEY' rakhein.");
+      console.error("API Key missing in Vercel!");
+      throw new Error("API Key missing. Please check VITE_GEMINI_API_KEY in Vercel settings.");
     }
 
     const text = typeof params === 'string' ? params : params.text;
-    console.log("Generating speech with DeAPI...");
+    console.log("Generating speech via DeAPI...");
 
     try {
-      // DeAPI Call (Direct Fetch)
       const response = await fetch('https://api.deapi.ai/api/v1/client/txt2audio', {
         method: 'POST',
         headers: {
@@ -27,14 +24,18 @@ export class TTSService {
         body: JSON.stringify({
           text: text,
           model: "Kokoro",
-          voice: "af_alloy",
-          response_format: "url"
+          voice: "af_alloy",     // Default Voice
+          response_format: "url",
+          lang: "en-us",         // ✅ FIXED: Bhasha batana zaroori tha
+          speed: 1               // Optional: Normal speed
         })
       });
 
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(`DeAPI Error: ${response.status} - ${errData.message || ''}`);
+        // Error details print karte hain taaki pata chale kya issue hai
+        const errorData = await response.json().catch(() => ({}));
+        console.error("DeAPI Error Details:", errorData);
+        throw new Error(`DeAPI Error ${response.status}: ${JSON.stringify(errorData)}`);
       }
 
       const data = await response.json();
@@ -42,17 +43,16 @@ export class TTSService {
 
       if (!audioUrl) throw new Error("DeAPI ne Audio URL nahi diya");
 
-      // Audio Download & Decode
+      // Audio download karke play karna
       const audioRes = await fetch(audioUrl);
       const arrayBuffer = await audioRes.arrayBuffer();
       return await decodeAudioData(arrayBuffer);
 
     } catch (error) {
-      console.error("TTS Error:", error);
+      console.error("TTS Process Failed:", error);
       throw error;
     }
   }
 }
 
-// Ye export zaroori hai taaki App.tsx error na de
 export const ttsService = new TTSService();
