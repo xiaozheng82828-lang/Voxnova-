@@ -1,4 +1,3 @@
-
 import { decodeAudioData } from '../utils/audioUtils';
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
@@ -6,12 +5,13 @@ const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 export class TTSService {
   
   async generateSpeech(params: any): Promise<AudioBuffer> {
-    if (!API_KEY) throw new Error("API Key missing.");
+    if (!API_KEY) throw new Error("API Key missing. Check Vercel settings.");
 
     const text = typeof params === 'string' ? params : params.text;
     console.log("Generating speech via DeAPI...");
 
     try {
+      // Hum 'url' format mangayenge kyunki wo sabse safe hai
       const response = await fetch('https://api.deapi.ai/api/v1/client/txt2audio', {
         method: 'POST',
         headers: {
@@ -22,7 +22,7 @@ export class TTSService {
           text: text,
           model: "Kokoro",
           voice: "af_alloy",
-          response_format: "base64", // Hum Base64 hi mangayenge
+          response_format: "url", // ✅ URL best hai (errors kam aate hain)
           lang: "en-us",
           format: "wav",
           sample_rate: 24000,
@@ -31,27 +31,43 @@ export class TTSService {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`DeAPI Error ${response.status}: ${JSON.stringify(errorData)}`);
+        const err = await response.json().catch(() => ({}));
+        throw new Error(`DeAPI Status ${response.status}: ${JSON.stringify(err)}`);
       }
 
       const data = await response.json();
       
-      // API alag-alag naam se data bhej sakta hai, sab check kar lete hain
-      let rawBase64 = data.data || data.audio_content || data.audio || data.base64 || data.url;
-
-      if (!rawBase64) {
-        console.error("API Response Full:", data);
-        throw new Error("API ne empty response diya. Console logs check karein.");
+      // --- LAYER 1: Agar URL mila to wahin se le lo (Best Case) ---
+      const audioUrl = data.url || data.audio_url;
+      if (audioUrl) {
+        console.log("Audio URL Found:", audioUrl);
+        const audioRes = await fetch(audioUrl);
+        const arrayBuffer = await audioRes.arrayBuffer();
+        return await decodeAudioData(arrayBuffer);
       }
 
-      // ✅ CLEANER: Prefix (data:audio/wav;base64,) aur spaces hatana
-      const base64String = rawBase64
-        .replace(/^data:audio\/[a-z]+;base64,/, "") // Prefix hataya
-        .replace(/\s/g, ""); // Spaces/Newlines hataye
+      // --- LAYER 2: Agar Base64 mila (Fallback) ---
+      let rawData = data.data || data.audio_content || data.audio || data.base64;
+      
+      if (!rawData) {
+        console.error("Empty Response:", data);
+        throw new Error("API ne na URL diya, na Audio data.");
+      }
+
+      // ✅ FIX: "replace is not a function" error yahan fix hoga
+      // Hum check kar rahe hain ki ye sach mein String hai ya nahi
+      if (typeof rawData !== 'string') {
+        console.warn("Received data is not a string, converting...", typeof rawData);
+        // Agar ye object ya array hai, to hum ise string mein convert karenge
+        rawData = String(rawData); 
+      }
+
+      // Ab replace karna safe hai
+      const base64String = rawData
+        .replace(/^data:audio\/[a-z]+;base64,/, "")
+        .replace(/\s/g, "");
 
       try {
-        // Ab clean string ko decode karein
         const binaryString = window.atob(base64String);
         const len = binaryString.length;
         const bytes = new Uint8Array(len);
@@ -60,8 +76,8 @@ export class TTSService {
         }
         return await decodeAudioData(bytes.buffer);
       } catch (e) {
-        console.error("Decoding Failed. Raw Data:", rawBase64);
-        throw new Error("Audio data corrupt tha, decode nahi ho paya.");
+        console.error("Decoding Failed. Data start:", base64String.substring(0, 50));
+        throw new Error("Audio decoding failed. Format sahi nahi tha.");
       }
 
     } catch (error) {
