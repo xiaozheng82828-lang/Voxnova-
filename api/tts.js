@@ -1,6 +1,7 @@
 // api/tts.js
 export default async function handler(req, res) {
   const { text } = req.body;
+  // Note: Vercel server environment variable use kar raha hai
   const apiKey = process.env.VITE_GEMINI_API_KEY;
 
   if (!apiKey) {
@@ -8,7 +9,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Wapas wahi address use kar rahe hain jo WORK kar raha tha
+    // 1. Call DeAPI (Correct Endpoint)
     const response = await fetch('https://api.deapi.ai/api/v1/client/txt2audio', {
       method: 'POST',
       headers: {
@@ -19,10 +20,11 @@ export default async function handler(req, res) {
         text: text,
         model: "Kokoro",
         voice: "af_alloy",
-        response_format: "base64", // Base64 mangayenge
+        response_format: "base64",
         lang: "en-us",
         format: "mp3",
-        speed: 1
+        speed: 1,
+        sample_rate: 24000  // ✅ FIXED: Ye field missing thi
       })
     });
 
@@ -33,29 +35,24 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    // 2. Data Hunt (Server side par dhundhna aasan hai)
-    // Hum check karenge ki audio string kahan chupi hai
+    // 2. Data Hunt (Nested Objects se audio nikalna)
     let base64String = null;
 
     if (data.data && typeof data.data === 'string') base64String = data.data;
     else if (data.base64) base64String = data.base64;
     else if (data.data && typeof data.data === 'object') {
-        // Nested object check (Aapka wala case!)
+        // Nested keys check
         base64String = data.data.base64 || data.data.audio || data.data.data;
     }
 
     if (!base64String) {
-        throw new Error(`Audio data not found in JSON: ${JSON.stringify(data).substring(0, 100)}...`);
+        throw new Error(`Audio data missing in JSON. Keys: ${Object.keys(data).join(", ")}`);
     }
 
-    // 3. Cleaning & Converting to Binary
-    // Prefix hatana (agar ho to)
+    // 3. Cleaning & Sending Audio
     const cleanBase64 = base64String.replace(/^data:audio\/[a-z0-9]+;base64,/, "").replace(/\s/g, "");
-    
-    // Binary Buffer banana
     const audioBuffer = Buffer.from(cleanBase64, 'base64');
 
-    // 4. Audio bhej do!
     res.setHeader('Content-Type', 'audio/mpeg');
     res.send(audioBuffer);
 
