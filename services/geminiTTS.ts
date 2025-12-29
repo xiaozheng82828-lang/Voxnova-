@@ -11,6 +11,7 @@ export class TTSService {
     console.log("Generating speech via DeAPI...");
 
     try {
+      // ✅ Request both URL and Base64 friendly format
       const response = await fetch('https://api.deapi.ai/api/v1/client/txt2audio', {
         method: 'POST',
         headers: {
@@ -21,7 +22,7 @@ export class TTSService {
           text: text,
           model: "Kokoro",
           voice: "af_alloy",
-          response_format: "b64_json", // Base64 is safer
+          response_format: "url", // URL maangte hain (Safe & Fast)
           lang: "en-us",
           format: "mp3",
           sample_rate: 24000,
@@ -30,63 +31,73 @@ export class TTSService {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`API Error ${response.status}: ${JSON.stringify(errorData)}`);
+        const err = await response.json().catch(() => ({}));
+        throw new Error(`API Error ${response.status}: ${JSON.stringify(err)}`);
       }
 
       const data = await response.json();
       
-      // --- 🕵️‍♂️ DEEP SEARCH ENGINE ---
-      // Hum ek helper function banayenge jo audio keys dhoondhega
-      const findAudioKey = (obj: any) => {
-        if (!obj) return null;
-        return obj.b64_json || obj.audio_content || obj.url || obj.audio_url || obj.data || obj.base64;
-      };
+      // --- 🕵️‍♂️ AUTO-DISCOVERY ENGINE (Naam nahi, Data dhoondo) ---
+      
+      let audioSource: string | null = null;
+      let sourceType = "none";
 
-      let targetString = null;
-      let foundType = "None";
+      // Helper function: Kya ye Audio jaisa dikhta hai?
+      const checkValue = (val: any) => {
+        if (typeof val !== 'string') return null;
+        if (val.startsWith('http')) return 'url'; // URL mila!
+        if (val.length > 500) return 'base64';    // Badi string = Base64!
+        return null;
+      }
 
-      // 1. Check Root Level
-      targetString = findAudioKey(data);
-      if (targetString && typeof targetString === 'string') foundType = "Root";
+      // 1. Root level check
+      for (const key in data) {
+        const type = checkValue(data[key]);
+        if (type) { audioSource = data[key]; sourceType = type; break; }
+      }
 
-      // 2. Check Inside 'data' Object (Ye aapka case hai!)
-      if (!targetString && data.data) {
-        if (Array.isArray(data.data) && data.data[0]) {
-          // Case: Array format [ { b64_json: ... } ]
-          targetString = findAudioKey(data.data[0]);
-          foundType = "Data Array[0]";
-        } else if (typeof data.data === 'object') {
-          // Case: Object format { request_id: ..., url: ... }
-          targetString = findAudioKey(data.data);
-          foundType = "Data Object";
-        } else if (typeof data.data === 'string') {
-          // Case: Direct string
-          targetString = data.data;
-          foundType = "Direct String";
+      // 2. Data Object level check (Aapka Case!)
+      if (!audioSource && data.data && typeof data.data === 'object') {
+        const innerData = data.data;
+        // Array case
+        if (Array.isArray(innerData)) {
+             if (innerData[0]) {
+                 for (const key in innerData[0]) {
+                     const type = checkValue(innerData[0][key]);
+                     if (type) { audioSource = innerData[0][key]; sourceType = type; break; }
+                 }
+             }
+        } 
+        // Object case (Ye wala!)
+        else {
+             for (const key in innerData) {
+                 const type = checkValue(innerData[key]);
+                 if (type) { audioSource = innerData[key]; sourceType = type; break; }
+             }
         }
       }
 
-      if (!targetString || typeof targetString !== 'string') {
-        const preview = JSON.stringify(data).substring(0, 200);
-        throw new Error(`AUDIO NOT FOUND in JSON. Preview: ${preview}...`);
+      // Agar ab bhi nahi mila, to saari keys dikhao taaki humein naam pata chale
+      if (!audioSource) {
+        let keysFound = Object.keys(data).join(", ");
+        if (data.data && typeof data.data === 'object') {
+            keysFound += " | Inside DATA: " + Object.keys(data.data).join(", ");
+        }
+        throw new Error(`AUDIO KEYS MISSING. Found Keys: [ ${keysFound} ]`);
       }
 
-      console.log(`Audio found in: ${foundType}`);
+      console.log(`Audio Found! Type: ${sourceType}`);
 
-      // --- HANDLING: URL vs Base64 ---
-      
-      // Agar ye URL hai (http se shuru hota hai)
-      if (targetString.startsWith('http')) {
-        const audioRes = await fetch(targetString);
+      // --- DECODING ---
+
+      if (sourceType === 'url') {
+        const audioRes = await fetch(audioSource);
         const arrayBuffer = await audioRes.arrayBuffer();
         return await decodeAudioData(arrayBuffer);
-      }
-
-      // Agar ye Base64 hai (Clean karke decode karo)
-      const cleanBase64 = targetString.replace(/^data:audio\/[a-z]+;base64,/, "").replace(/\s/g, "");
-
-      try {
+      } 
+      else {
+        // Base64 Cleaning
+        const cleanBase64 = audioSource.replace(/^data:audio\/[a-z]+;base64,/, "").replace(/\s/g, "");
         const binaryString = window.atob(cleanBase64);
         const len = binaryString.length;
         const bytes = new Uint8Array(len);
@@ -94,8 +105,6 @@ export class TTSService {
           bytes[i] = binaryString.charCodeAt(i);
         }
         return await decodeAudioData(bytes.buffer);
-      } catch (e) {
-        throw new Error(`Decoding Failed. Data start: ${cleanBase64.substring(0, 30)}...`);
       }
 
     } catch (error) {
