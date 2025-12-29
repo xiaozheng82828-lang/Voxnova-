@@ -1,45 +1,66 @@
 // api/tts.js
-// Ye server-side code hai, yahan CORS ka problem nahi hota
 export default async function handler(req, res) {
-  // Browser se text lete hain
   const { text } = req.body;
-  
-  // Vercel se Key uthate hain
   const apiKey = process.env.VITE_GEMINI_API_KEY;
 
   if (!apiKey) {
-    return res.status(500).json({ error: "API Key missing on server" });
+    return res.status(500).json({ error: "Server Key missing" });
   }
 
   try {
-    // DeAPI Standard Endpoint (Jo browser me fail ho raha tha, yahan chalega)
-    const apiResponse = await fetch('https://api.deapi.ai/v1/audio/speech', {
+    // 1. Wapas wahi address use kar rahe hain jo WORK kar raha tha
+    const response = await fetch('https://api.deapi.ai/api/v1/client/txt2audio', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: "kokoro",
-        input: text,
+        text: text,
+        model: "Kokoro",
         voice: "af_alloy",
-        response_format: "mp3" // Humein seedha MP3 chahiye
+        response_format: "base64", // Base64 mangayenge
+        lang: "en-us",
+        format: "mp3",
+        speed: 1
       })
     });
 
-    if (!apiResponse.ok) {
-      throw new Error(`DeAPI Error: ${apiResponse.status}`);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(`DeAPI Error ${response.status}: ${JSON.stringify(err)}`);
     }
 
-    // Audio data convert karke wapas bhejte hain
-    const arrayBuffer = await apiResponse.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const data = await response.json();
 
+    // 2. Data Hunt (Server side par dhundhna aasan hai)
+    // Hum check karenge ki audio string kahan chupi hai
+    let base64String = null;
+
+    if (data.data && typeof data.data === 'string') base64String = data.data;
+    else if (data.base64) base64String = data.base64;
+    else if (data.data && typeof data.data === 'object') {
+        // Nested object check (Aapka wala case!)
+        base64String = data.data.base64 || data.data.audio || data.data.data;
+    }
+
+    if (!base64String) {
+        throw new Error(`Audio data not found in JSON: ${JSON.stringify(data).substring(0, 100)}...`);
+    }
+
+    // 3. Cleaning & Converting to Binary
+    // Prefix hatana (agar ho to)
+    const cleanBase64 = base64String.replace(/^data:audio\/[a-z0-9]+;base64,/, "").replace(/\s/g, "");
+    
+    // Binary Buffer banana
+    const audioBuffer = Buffer.from(cleanBase64, 'base64');
+
+    // 4. Audio bhej do!
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.send(buffer);
+    res.send(audioBuffer);
 
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: error.message });
   }
-          }
+}
