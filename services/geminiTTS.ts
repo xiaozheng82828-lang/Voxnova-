@@ -5,7 +5,6 @@ const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 export class TTSService {
   
   async generateSpeech(params: any): Promise<AudioBuffer> {
-    // 1. Safety Check
     if (!API_KEY) {
       throw new Error("API Key missing. Check VITE_GEMINI_API_KEY in Vercel settings.");
     }
@@ -14,7 +13,7 @@ export class TTSService {
     console.log("Generating speech via DeAPI...");
 
     try {
-      // 2. DeAPI Call with ALL required fields
+      // ✅ Sabhi required fields ek saath
       const response = await fetch('https://api.deapi.ai/api/v1/client/txt2audio', {
         method: 'POST',
         headers: {
@@ -26,14 +25,14 @@ export class TTSService {
           model: "Kokoro",
           voice: "af_alloy",
           response_format: "url",
-          lang: "en-us",        // Language
-          format: "wav",        // ✅ NEW: Error fix (wav/mp3)
-          sample_rate: 24000    // ✅ NEW: Error fix (Quality)
+          lang: "en-us",         // Language
+          format: "wav",         // Format
+          sample_rate: 24000,    // Quality
+          speed: 1               // ✅ NEW: Speed field add kar diya (1 = Normal speed)
         })
       });
 
       if (!response.ok) {
-        // Agar error aaye to detail mein dikhaye
         const errorData = await response.json().catch(() => ({}));
         console.error("DeAPI Error Details:", JSON.stringify(errorData));
         throw new Error(`DeAPI Error ${response.status}: ${JSON.stringify(errorData)}`);
@@ -44,7 +43,6 @@ export class TTSService {
 
       if (!audioUrl) throw new Error("DeAPI ne Audio URL nahi diya");
 
-      // 3. Audio Download & Decode
       const audioRes = await fetch(audioUrl);
       const arrayBuffer = await audioRes.arrayBuffer();
       return await decodeAudioData(arrayBuffer);
@@ -56,5 +54,4 @@ export class TTSService {
   }
 }
 
-// Export zaroori hai
 export const ttsService = new TTSService();
