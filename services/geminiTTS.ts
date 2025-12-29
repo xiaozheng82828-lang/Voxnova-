@@ -8,85 +8,41 @@ export class TTSService {
     if (!API_KEY) throw new Error("API Key missing.");
 
     const text = typeof params === 'string' ? params : params.text;
-    console.log("Generating speech via DeAPI...");
+    console.log("Generating speech via DeAPI Standard...");
 
     try {
-      // ✅ Back to 'base64' (Kyunki URL format me data nahi mil raha)
-      const response = await fetch('https://api.deapi.ai/api/v1/client/txt2audio', {
+      // ✅ CHANGE: Hum Standard OpenAI Endpoint use karenge
+      // Ye endpoint sabse reliable hai aur seedha Audio deta hai
+      const response = await fetch('https://api.deapi.ai/v1/audio/speech', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${API_KEY}`
         },
         body: JSON.stringify({
-          text: text,
-          model: "Kokoro",
+          model: "kokoro",       // Model wahi rahega
+          input: text,           // Note: Yahan 'text' ki jagah 'input' likhte hain
           voice: "af_alloy",
-          response_format: "base64", // Ye zaroori hai
-          lang: "en-us",
-          format: "mp3",
-          sample_rate: 24000,
-          speed: 1
+          response_format: "mp3" // Direct MP3 file mangayenge
         })
       });
 
       if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(`API Error ${response.status}: ${JSON.stringify(err)}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`API Error ${response.status}: ${JSON.stringify(errorData)}`);
       }
 
-      const data = await response.json();
+      // ✅ SIMPLE LOGIC:
+      // Ab humein JSON parse karne ki zarurat nahi.
+      // Response seedha 'Audio File' hai.
+      const arrayBuffer = await response.arrayBuffer();
       
-      // --- 🕵️‍♂️ DRILL DOWN ENGINE (Data ko khod ke nikalo) ---
-      
-      let finalAudioString: string | null = null;
-      let foundPath = "none";
-
-      // Function jo check karega ki ye string audio hai ya nahi
-      const isAudioString = (val: any) => typeof val === 'string' && val.length > 100;
-
-      // 1. Direct Check
-      if (isAudioString(data.data)) {
-        finalAudioString = data.data;
-        foundPath = "data.data";
-      }
-      else if (isAudioString(data.base64)) {
-        finalAudioString = data.base64;
-        foundPath = "data.base64";
-      }
-      // 2. Deep Check (Agar data object hai)
-      else if (data.data && typeof data.data === 'object') {
-        // Nested keys check karo
-        const inner = data.data;
-        if (isAudioString(inner.base64)) { finalAudioString = inner.base64; foundPath = "data.data.base64"; }
-        else if (isAudioString(inner.audio)) { finalAudioString = inner.audio; foundPath = "data.data.audio"; }
-        else if (isAudioString(inner.data)) { finalAudioString = inner.data; foundPath = "data.data.data"; }
+      // Check karein ki data khali to nahi hai
+      if (arrayBuffer.byteLength < 100) {
+        throw new Error("Audio file empty aayi hai.");
       }
 
-      // 3. Agar ab bhi na mile, to ERROR dikhao (par JSON ke sath)
-      if (!finalAudioString) {
-        // Hum pura JSON stringify karke error me dikhayenge taaki structure dikh jaye
-        const jsonPreview = JSON.stringify(data).substring(0, 300);
-        throw new Error(`AUDIO STRING NOT FOUND. JSON RECEIVED: ${jsonPreview}`);
-      }
-
-      console.log(`Audio Found at: ${foundPath}`);
-
-      // --- CLEANING & DECODING ---
-      // Prefix hatana (data:audio/mp3;base64, ...)
-      const cleanBase64 = finalAudioString.replace(/^data:audio\/[a-z0-9]+;base64,/, "").replace(/\s/g, "");
-
-      try {
-        const binaryString = window.atob(cleanBase64);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        return await decodeAudioData(bytes.buffer);
-      } catch (e) {
-        throw new Error("Decoding Failed. String was invalid base64.");
-      }
+      return await decodeAudioData(arrayBuffer);
 
     } catch (error) {
       console.error("TTS Process Failed:", error);
