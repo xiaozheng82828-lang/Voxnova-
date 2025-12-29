@@ -1,45 +1,33 @@
 import { decodeAudioData } from '../utils/audioUtils';
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-
 export class TTSService {
   
   async generateSpeech(params: any): Promise<AudioBuffer> {
-    if (!API_KEY) throw new Error("API Key missing.");
-
     const text = typeof params === 'string' ? params : params.text;
-    console.log("Generating speech via DeAPI Standard...");
+    console.log("Calling Vercel Proxy for TTS...");
 
     try {
-      // ✅ CHANGE: Hum Standard OpenAI Endpoint use karenge
-      // Ye endpoint sabse reliable hai aur seedha Audio deta hai
-      const response = await fetch('https://api.deapi.ai/v1/audio/speech', {
+      // ✅ AB HUM APNE KHUD KE SERVER SE BAAT KARENGE
+      // Ye '/api/tts' us 'api/tts.js' file ko call karega jo humne abhi banayi
+      const response = await fetch('/api/tts', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${API_KEY}`
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          model: "kokoro",       // Model wahi rahega
-          input: text,           // Note: Yahan 'text' ki jagah 'input' likhte hain
-          voice: "af_alloy",
-          response_format: "mp3" // Direct MP3 file mangayenge
-        })
+        body: JSON.stringify({ text: text })
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`API Error ${response.status}: ${JSON.stringify(errorData)}`);
+        const err = await response.json().catch(() => ({}));
+        throw new Error(`Server Error: ${err.error || response.statusText}`);
       }
 
-      // ✅ SIMPLE LOGIC:
-      // Ab humein JSON parse karne ki zarurat nahi.
-      // Response seedha 'Audio File' hai.
+      // Server ne humein saaf-suthra MP3 bheja hai
       const arrayBuffer = await response.arrayBuffer();
       
-      // Check karein ki data khali to nahi hai
+      // Check agar file khali hai
       if (arrayBuffer.byteLength < 100) {
-        throw new Error("Audio file empty aayi hai.");
+        throw new Error("Empty audio received from server");
       }
 
       return await decodeAudioData(arrayBuffer);
