@@ -1,15 +1,12 @@
 // api/tts.js
 export default async function handler(req, res) {
   const { text } = req.body;
-  // Note: Vercel server environment variable use kar raha hai
   const apiKey = process.env.VITE_GEMINI_API_KEY;
 
-  if (!apiKey) {
-    return res.status(500).json({ error: "Server Key missing" });
-  }
+  if (!apiKey) return res.status(500).json({ error: "Server Key missing" });
 
   try {
-    // 1. Call DeAPI (Correct Endpoint)
+    // 1. WAV Format use kar rahe hain (Kyunki ye Instant milta hai)
     const response = await fetch('https://api.deapi.ai/api/v1/client/txt2audio', {
       method: 'POST',
       headers: {
@@ -22,9 +19,9 @@ export default async function handler(req, res) {
         voice: "af_alloy",
         response_format: "base64",
         lang: "en-us",
-        format: "mp3",
+        format: "wav",       // ✅ FIXED: MP3 hata kar WAV kiya (Synchronous)
         speed: 1,
-        sample_rate: 24000  // ✅ FIXED: Ye field missing thi
+        sample_rate: 24000
       })
     });
 
@@ -35,26 +32,46 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    // 2. Data Hunt (Nested Objects se audio nikalna)
-    let base64String = null;
+    // 2. Smart Search (JSON me kahin bhi string dhoondho jo 100+ chars ki ho)
+    const findAudioString = (obj) => {
+        if (!obj) return null;
+        // Agar string hai aur badi hai (matlab base64 ya url hai)
+        if (typeof obj === 'string' && obj.length > 100) return obj;
+        
+        // Agar object hai to andar jhak kar dekho
+        if (typeof obj === 'object') {
+            for (const key in obj) {
+                const found = findAudioString(obj[key]);
+                if (found) return found;
+            }
+        }
+        return null;
+    };
 
-    if (data.data && typeof data.data === 'string') base64String = data.data;
-    else if (data.base64) base64String = data.base64;
-    else if (data.data && typeof data.data === 'object') {
-        // Nested keys check
-        base64String = data.data.base64 || data.data.audio || data.data.data;
+    const audioSource = findAudioString(data);
+
+    if (!audioSource) {
+        // Agar ab bhi na mile, to pura JSON error me dikhao
+        throw new Error(`Audio missing. Full Response: ${JSON.stringify(data)}`);
     }
 
-    if (!base64String) {
-        throw new Error(`Audio data missing in JSON. Keys: ${Object.keys(data).join(", ")}`);
+    // 3. Process & Send (URL ya Base64 handle karna)
+    let finalBuffer;
+    
+    if (audioSource.startsWith('http')) {
+        // Agar URL hai to download karo
+        const urlRes = await fetch(audioSource);
+        const arrayBuf = await urlRes.arrayBuffer();
+        finalBuffer = Buffer.from(arrayBuf);
+    } else {
+        // Agar Base64 hai to clean karke convert karo
+        const cleanBase64 = audioSource.replace(/^data:audio\/[a-z0-9]+;base64,/, "").replace(/\s/g, "");
+        finalBuffer = Buffer.from(cleanBase64, 'base64');
     }
 
-    // 3. Cleaning & Sending Audio
-    const cleanBase64 = base64String.replace(/^data:audio\/[a-z0-9]+;base64,/, "").replace(/\s/g, "");
-    const audioBuffer = Buffer.from(cleanBase64, 'base64');
-
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.send(audioBuffer);
+    // Frontend ko Audio bhej do
+    res.setHeader('Content-Type', 'audio/wav');
+    res.send(finalBuffer);
 
   } catch (error) {
     console.error(error);
